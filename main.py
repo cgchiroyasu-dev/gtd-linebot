@@ -16,8 +16,6 @@ import hashlib
 import hmac
 import json
 import os
-from datetime import datetime
-from zoneinfo import ZoneInfo
 
 import requests
 from dotenv import load_dotenv
@@ -38,8 +36,6 @@ REQUIRED_ENV = [
 _missing = [k for k in REQUIRED_ENV if not os.environ.get(k)]
 if _missing:
     raise ValueError(f"Missing required environment variables: {', '.join(_missing)}")
-
-JST = ZoneInfo("Asia/Tokyo")
 
 app = FastAPI()
 
@@ -77,9 +73,8 @@ def _reply_line(reply_token: str, text: str) -> None:
 
 # ── タスク作成ハンドラ ───────────────────────────────────────────────────────────
 async def _handle_task(task_name: str, reply_token: str) -> None:
-    today = datetime.now(JST).date()
     try:
-        create_task(task_name, today)
+        create_task(task_name)
         _reply_line(reply_token, f"✅ タスク追加: {task_name}")
     except RuntimeError as e:
         print(f"[Notion error] {e}")
