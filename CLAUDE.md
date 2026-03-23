@@ -49,15 +49,21 @@ cloudflared tunnel --url http://localhost:8000
 LINE メッセージ送信
   └→ POST /webhook (FastAPI)
        ├─ HMAC-SHA256 署名検証
-       ├─ notion_client.create_task()
-       │    Name: メッセージ内容
-       │    Date: (設定しない)
-       │    Action Type: (設定しない)
-       └─ LINE 返信「✅ タスク追加: {タスク名}」
+       ├─ HTTP 200 を即時返却（LINEタイムアウト対策）
+       └─ BackgroundTask（非同期）
+            ├─ notion_client.create_task()（Name: メッセージ内容）
+            └─ LINE 返信「✅ タスク追加: {タスク名}」
 ```
+
+## スリープ防止構成（2重化）
+
+- **UptimeRobot**（外部）: `/health` を5分おきにping（無料）
+- **Render Cron Job**（内部）: `python ping.py` を `*/5 * * * *` で実行
 
 ## Gotchas
 
 - LINE チャネルアクセストークンは **170文字以上** が正規。短い文字列は別の値なので注意
 - Notion Integration を DB_Task2026 に「コネクト」していないと 403 で失敗する
-- Render は無料プランだとスリープあり → 初回リクエストに数十秒かかる場合がある
+- Render 無料プランは15分スリープあり → UptimeRobot + Render Cron Job で防止
+- webhook は `BackgroundTasks` で即時200返却。Notion処理はバックグラウンドで実行する
+- `_handle_task` は `async def` ではなく **sync `def`** にすること（BackgroundTasksがスレッドで実行するため）

@@ -19,7 +19,7 @@ import os
 
 import requests
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 
 from notion_client import create_task
 
@@ -71,19 +71,21 @@ def _reply_line(reply_token: str, text: str) -> None:
         print(f"[LINE reply error] {r.status_code}: {r.text}")
 
 
-# ── タスク作成ハンドラ ───────────────────────────────────────────────────────────
-async def _handle_task(task_name: str, reply_token: str) -> None:
+# ── タスク作成ハンドラ（バックグラウンド実行）──────────────────────────────────────
+def _handle_task(task_name: str, reply_token: str) -> None:
+    print(f"[task] start: {task_name!r}")
     try:
         create_task(task_name)
+        print(f"[task] done: {task_name!r}")
         _reply_line(reply_token, f"✅ タスク追加: {task_name}")
     except RuntimeError as e:
-        print(f"[Notion error] {e}")
+        print(f"[task] Notion error: {e}")
         _reply_line(reply_token, "⚠️ タスクの追加に失敗しました。もう一度お試しください。")
 
 
 # ── webhook エンドポイント ────────────────────────────────────────────────────────
 @app.post("/webhook")
-async def webhook(request: Request):
+async def webhook(request: Request, background_tasks: BackgroundTasks):
     body_bytes = await request.body()
 
     # 署名検証 (LINE Messaging API 必須)
@@ -102,6 +104,8 @@ async def webhook(request: Request):
         if not task_name:
             continue
         reply_token = event.get("replyToken", "")
-        await _handle_task(task_name, reply_token)
+        print(f"[webhook] received: {task_name!r}")
+        # Notion処理はバックグラウンドで実行し、LINEへ即座に200を返す
+        background_tasks.add_task(_handle_task, task_name, reply_token)
 
     return {"status": "ok"}

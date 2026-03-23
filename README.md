@@ -1,6 +1,6 @@
 # LINE Bot → Notion タスク追加
 
-LINEにタスク名を送ると、Notion DB_Task2026にDateが「今日」のタスクを自動登録するbot。
+LINEにタスク名を送ると、Notion DB_Task2026にタスクを自動登録するbot。Date / Action Typeは設定しない（受信箱に積む運用）。
 
 ## 動作フロー
 
@@ -8,11 +8,11 @@ LINEにタスク名を送ると、Notion DB_Task2026にDateが「今日」のタ
 LINEでメッセージ送信
   └→ Render (FastAPI)
        ├─ 署名検証 (HMAC-SHA256)
-       ├─ Notion DB_Task2026 にタスク作成
-       │    Name: メッセージ内容
-       │    Date: 今日(JST)
-       │    Action Type: Next Action
-       └─ LINE返信 "✅ タスク追加: {タスク名}"
+       ├─ HTTP 200 を即時返却（LINEタイムアウト対策）
+       └─ BackgroundTask（非同期）
+            ├─ Notion DB_Task2026 にタスク作成
+            │    Name: メッセージ内容
+            └─ LINE返信 "✅ タスク追加: {タスク名}"
 ```
 
 **GitHub**: https://github.com/Capel1801/gtd-linebot
@@ -106,8 +106,8 @@ https://gtd-linebot.onrender.com/webhook
 1. LINEで「テストタスク」と送信
 2. Notion DB_Task2026 を確認：
    - Name: テストタスク
-   - Date: 今日の日付
-   - Action Type: Next Action
+   - Date: （空）
+   - Action Type: （空）
 3. LINEに `✅ タスク追加: テストタスク` が返信されることを確認
 
 ---
@@ -140,10 +140,21 @@ uvicornのログで `401` が出ていないか確認する。
 **原因: Renderのコールドスタート**
 無料プランは15分無操作でスリープ。復帰に最大30秒かかりreply token（30秒で失効）が切れる。
 
-**対策**: [UptimeRobot](https://uptimerobot.com/) で `/health` を5分間隔でpingする（無料）。
+**対策A（UptimeRobot）**: [uptimerobot.com](https://uptimerobot.com/) で `/health` を5分間隔でpingする（無料）。
 ```
-https://gtd-linebot.onrender.com/health
+Monitor Type: HTTP(s)
+URL: https://gtd-linebot.onrender.com/health
+Interval: 5 minutes
 ```
+
+**対策C（Render Cron Job）**: Renderダッシュボードから別サービスとして Cron Job を作成。
+```
+Repository: Capel1801/gtd-linebot（同じリポジトリ）
+Command:    python ping.py
+Schedule:   */5 * * * *
+```
+
+AとCを併用することでスリープ防止の2重化が可能。
 
 ### 署名検証エラー（400 Invalid signature）
 
