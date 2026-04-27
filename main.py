@@ -16,6 +16,7 @@ import hashlib
 import hmac
 import json
 import os
+import time
 
 import requests
 from dotenv import load_dotenv
@@ -37,13 +38,17 @@ _missing = [k for k in REQUIRED_ENV if not os.environ.get(k)]
 if _missing:
     raise ValueError(f"Missing required environment variables: {', '.join(_missing)}")
 
+_boot_time = time.time()
+print(f"[boot] Service started at {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(_boot_time))}")
+
 app = FastAPI()
 
 
 # ── ヘルスチェック ──────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    uptime_sec = int(time.time() - _boot_time)
+    return {"status": "ok", "uptime_seconds": uptime_sec}
 
 
 # ── LINE署名検証 ────────────────────────────────────────────────────────────────
@@ -67,25 +72,53 @@ def _reply_line(reply_token: str, text: str) -> None:
     }
     r = requests.post(url, headers=headers, json=payload, timeout=10)
     if r.status_code != 200:
-        # タスクは既に保存済みのためログのみ
         print(f"[LINE reply error] {r.status_code}: {r.text}")
 
 
+# ── LINE Push API（reply token失効時の代替）──────────────────────────────────────
+def _push_line(user_id: str, text: str) -> None:
+    url = "https://api.line.me/v2/bot/message/push"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {os.environ['LINE_CHANNEL_ACCESS_TOKEN']}",
+    }
+    payload = {
+        "to": user_id,
+        "messages": [{"type": "text", "text": text}],
+    }
+    r = requests.post(url, headers=headers, json=payload, timeout=10)
+    if r.status_code != 200:
+        print(f"[LINE push error] {r.status_code}: {r.text}")
+
+
 # ── タスク作成ハンドラ（バックグラウンド実行）──────────────────────────────────────
-def _handle_task(task_name: str, reply_token: str) -> None:
+def _handle_task(task_name: str, reply_token: str, user_id: str, received_at: float) -> None:
     print(f"[task] start: {task_name!r}")
     try:
         create_task(task_name)
         print(f"[task] done: {task_name!r}")
-        _reply_line(reply_token, f"✅ タスク追加: {task_name}")
+        elapsed = time.time() - received_at
+        msg = f"✅ タスク追加: {task_name}"
+        if elapsed > 25:
+            # Reply token likely expired (30s TTL), use push instead
+            print(f"[task] reply token likely expired ({elapsed:.1f}s), using push API")
+            _push_line(user_id, msg)
+        else:
+            _reply_line(reply_token, msg)
     except RuntimeError as e:
         print(f"[task] Notion error: {e}")
-        _reply_line(reply_token, "⚠️ タスクの追加に失敗しました。もう一度お試しください。")
+        error_msg = "⚠️ タスクの追加に失敗しました。もう一度お試しください。"
+        elapsed = time.time() - received_at
+        if elapsed > 25:
+            _push_line(user_id, error_msg)
+        else:
+            _reply_line(reply_token, error_msg)
 
 
 # ── webhook エンドポイント ────────────────────────────────────────────────────────
 @app.post("/webhook")
 async def webhook(request: Request, background_tasks: BackgroundTasks):
+    received_at = time.time()
     body_bytes = await request.body()
 
     # 署名検証 (LINE Messaging API 必須)
@@ -104,8 +137,8 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         if not task_name:
             continue
         reply_token = event.get("replyToken", "")
+        user_id = event.get("source", {}).get("userId", "")
         print(f"[webhook] received: {task_name!r}")
-        # Notion処理はバックグラウンドで実行し、LINEへ即座に200を返す
-        background_tasks.add_task(_handle_task, task_name, reply_token)
+        background_tasks.add_task(_handle_task, task_name, reply_token, user_id, received_at)
 
     return {"status": "ok"}

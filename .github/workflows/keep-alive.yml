@@ -1,0 +1,26 @@
+name: Keep Alive
+
+on:
+  schedule:
+    # Every 14 minutes — just under Render's 15-min sleep threshold.
+    # GitHub Actions cron can delay up to ~5 min, so 14 min gives margin.
+    - cron: "*/14 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        run: |
+          for i in 1 2 3; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 https://gtd-linebot.onrender.com/health)
+            echo "Attempt $i: HTTP $STATUS"
+            if [ "$STATUS" = "200" ]; then
+              echo "Service is awake"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::warning::Service may be unresponsive after 3 attempts"
+          exit 1
