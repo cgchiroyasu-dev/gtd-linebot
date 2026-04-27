@@ -37,6 +37,24 @@ def _post_with_retry(url: str, payload: dict, max_retries: int = 3) -> requests.
     return response  # type: ignore[return-value]
 
 
+def check_notion_connection() -> tuple[bool, str]:
+    """
+    Notion API に疎通確認する（DB metadata を取得）。
+
+    Returns:
+        (True, "ok") on success, (False, error_detail) on failure
+    """
+    db_id = os.environ["NOTION_DB_TASK_2026_ID"]
+    url = f"{NOTION_BASE_URL}/databases/{db_id}"
+    try:
+        r = requests.get(url, headers=_headers(), timeout=15)
+        if r.status_code == 200:
+            return (True, "ok")
+        return (False, f"HTTP {r.status_code}")
+    except requests.RequestException as e:
+        return (False, str(e))
+
+
 def create_task(title: str) -> dict:
     """
     DB_Task2026 に1件のタスクを作成する。Date / Action Type は設定しない。

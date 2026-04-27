@@ -22,7 +22,7 @@ import requests
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 
-from notion_client import create_task
+from notion_client import create_task, check_notion_connection
 
 load_dotenv()
 
@@ -49,6 +49,16 @@ app = FastAPI()
 async def health():
     uptime_sec = int(time.time() - _boot_time)
     return {"status": "ok", "uptime_seconds": uptime_sec}
+
+
+# ── セルフテスト（Notion疎通確認）──────────────────────────────────────────────
+@app.get("/self-test")
+async def self_test():
+    uptime_sec = int(time.time() - _boot_time)
+    notion_ok, notion_detail = check_notion_connection()
+    if notion_ok:
+        return {"status": "ok", "notion": "connected", "uptime_seconds": uptime_sec}
+    return {"status": "error", "notion": notion_detail, "uptime_seconds": uptime_sec}
 
 
 # ── LINE署名検証 ────────────────────────────────────────────────────────────────

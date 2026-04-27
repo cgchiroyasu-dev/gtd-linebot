@@ -1,0 +1,37 @@
+name: Daily Self-Test
+
+on:
+  schedule:
+    - cron: "0 21 * * *"  # 06:00 JST daily
+  workflow_dispatch:
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run self-test endpoint
+        id: test
+        run: |
+          RESPONSE=$(curl -s --max-time 60 https://gtd-linebot.onrender.com/self-test)
+          echo "Response: $RESPONSE"
+          STATUS=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','error'))" 2>/dev/null || echo "error")
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          if [ "$STATUS" != "ok" ]; then
+            echo "::error::Self-test failed: $RESPONSE"
+            exit 1
+          fi
+
+      - name: Alert on failure via LINE Push
+        if: failure()
+        env:
+          LINE_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_OWNER_ID: ${{ secrets.LINE_OWNER_USER_ID }}
+        run: |
+          if [ -z "$LINE_TOKEN" ] || [ -z "$LINE_OWNER_ID" ]; then
+            echo "::warning::LINE secrets not configured, skipping push notification"
+            exit 0
+          fi
+          curl -s -X POST https://api.line.me/v2/bot/message/push \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $LINE_TOKEN" \
+            -d "{\"to\":\"$LINE_OWNER_ID\",\"messages\":[{\"type\":\"text\",\"text\":\"⚠️ GTD LINE Bot セルフテスト失敗\\nNotionへの接続またはサービスに問題が発生しています。確認してください。\"}]}"

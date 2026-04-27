@@ -2,8 +2,6 @@ name: Keep Alive
 
 on:
   schedule:
-    # Every 14 minutes — just under Render's 15-min sleep threshold.
-    # GitHub Actions cron can delay up to ~5 min, so 14 min gives margin.
     - cron: "*/14 * * * *"
   workflow_dispatch:
 
@@ -22,5 +20,5 @@ jobs:
             fi
             sleep 10
           done
-          echo "::warning::Service may be unresponsive after 3 attempts"
+          echo "::error::Service unresponsive after 3 attempts"
           exit 1
